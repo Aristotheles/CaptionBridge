@@ -1,0 +1,50 @@
+Metadata-Version: 2.4
+Name: ceviri-app
+Version: 0.1.0
+Summary: Live caption and translation desktop app for Windows
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: azure-cognitiveservices-speech>=1.41.1
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: soundcard>=0.4.5
+Requires-Dist: sounddevice>=0.5.0
+
+# Ceviri App
+
+Bu repo, elde kalan `CeviriApp.exe` davranisindan yola cikilarak yeniden kurulmus kaynak kod temelidir.
+
+## Hedef
+
+- Canli altyazi ve ceviri
+- Stereo Mix veya baska bir giris cihazi secimi
+- Anlik ve final metinlerin ayri panellerde izlenmesi
+- Panellerin ayri pencereye alinmasi
+- Ustte kalma ve yazi boyutu kontrolu
+- Konusma gecmisini export/import etme
+- Azure anahtarini kullanicinin kendisinin girmesi
+
+## Kurulum
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
+```
+
+## Calistirma
+
+```powershell
+ceviri-app
+```
+
+veya
+
+```powershell
+py -3 -m ceviri_app
+```
+
+## Notlar
+
+- Azure Speech key ve region repoya konmamalidir.
+- Uygulama acildiginda anahtari UI uzerinden girebilir veya `.env` kullanabilirsiniz.
+- `Import` su an uygulamanin kendi export ettigi JSON formatini geri yukler.

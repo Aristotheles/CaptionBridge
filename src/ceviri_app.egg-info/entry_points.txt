@@ -1,0 +1,2 @@
+[console_scripts]
+ceviri-app = ceviri_app.main:main
