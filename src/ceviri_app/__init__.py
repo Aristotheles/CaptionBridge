@@ -1,0 +1,1 @@
+"""Ceviri desktop app package."""

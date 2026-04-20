@@ -1,0 +1,42 @@
+# Local environment
+.env
+.env.local
+.venv/
+env/
+venv/
+ENV/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build and Distribution
+build/
+dist/
+dist_*/
+*.spec
+
+# User specific config (CaptionsBridge data is in APPDATA, but just in case)
+config.json
+
+# Logs & Tests
+*.log
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific analysis, scratch, and build files
+_analysis/
+ANALIZ.md
+scratch/
+*.egg-info/
+
