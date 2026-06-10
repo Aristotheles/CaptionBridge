@@ -15,6 +15,9 @@ ENV_PATH = Path.cwd() / ".env"
 class AppConfig:
     speech_key: str = ""
     speech_region: str = ""
+    gemini_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    ai_profile: str = ""
     source_locale: str = "de-DE"
     target_language: str = "tr"
     ui_language: str = ""  # Initialized in __post_init__ if empty
@@ -75,6 +78,8 @@ def load_config() -> AppConfig:
     env_values = _load_env_file(ENV_PATH)
     config.speech_key = env_values.get("AZURE_SPEECH_KEY", config.speech_key)
     config.speech_region = env_values.get("AZURE_SPEECH_REGION", config.speech_region)
+    config.gemini_key = env_values.get("GEMINI_API_KEY", config.gemini_key)
+    config.gemini_model = env_values.get("GEMINI_MODEL", config.gemini_model)
     config.source_locale = env_values.get("CEVIRI_SOURCE_LOCALE", config.source_locale)
     config.target_language = env_values.get("CEVIRI_TARGET_LANGUAGE", config.target_language)
     config.ui_language = env_values.get("CEVIRI_UI_LANGUAGE", config.ui_language)

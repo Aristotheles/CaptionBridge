@@ -37,6 +37,7 @@ from .config import AppConfig, load_config, save_config
 from .i18n import PRODUCT_NAME, UI_LANGUAGE_OPTIONS, translate
 from .languages import LANGUAGES, LANGUAGE_BY_LABEL, source_label_for_locale, target_label_for_code
 from .translator import LiveTranslationSession, run_azure_translation_test
+from .ai_assistant import generate_interview_answer
 
 
 COLORS = {
@@ -44,6 +45,7 @@ COLORS = {
     "surface": "#ffffff",
     "panel": "#0f1720",
     "panel_alt": "#111827",
+    "panel_answer": "#0d2a26",
     "ink": "#13212b",
     "muted": "#5b6b73",
     "line": "#d7dfdc",
@@ -58,20 +60,61 @@ class TranscriptPanel:
     title: str
     frame: ttk.LabelFrame
     widget: ScrolledText
+    font_size_var: tk.IntVar = None  # type: ignore[assignment]
     detach_button: ttk.Button | None = None
     copy_button: ttk.Button | None = None
     clear_button: ttk.Button | None = None
+    gen_button: ttk.Button | None = None
 
 
 class DetachedPanel(tk.Toplevel):
-    def __init__(self, master: tk.Misc, title: str, font_size: int) -> None:
+    def __init__(
+        self,
+        master: tk.Misc,
+        title: str,
+        font_size: int,
+        on_generate: object = None,
+        gen_label: str = "Cevap Uret",
+        header_color: str = "#1e3a2f",
+    ) -> None:
         super().__init__(master)
         self.title(title)
-        self.geometry("760x420")
+        self.geometry("760x460")
         self.resizable(True, True)
-        self.minsize(320, 200)
+        self.minsize(320, 220)
         self.configure(bg=COLORS["bg"])
         self.attributes("-topmost", True)
+
+        self._font_size_var = tk.IntVar(value=font_size)
+
+        # Renkli başlık şeridi (Almanca=kırmızı, Türkçe=mavi)
+        header_strip = tk.Frame(self, bg=header_color, height=36)
+        header_strip.pack(fill="x")
+        header_strip.pack_propagate(False)
+        self._header_label = tk.Label(
+            header_strip,
+            text=title,
+            bg=header_color,
+            fg="white",
+            font=("Bahnschrift SemiBold", 11),
+            anchor="w",
+        )
+        self._header_label.pack(side="left", padx=12, pady=7)
+
+        toolbar = ttk.Frame(self, style="Toolbar.TFrame")
+        toolbar.pack(fill="x", padx=10, pady=(8, 0))
+
+        # Font küçült / büyüt
+        ttk.Button(toolbar, text="-", style="Soft.TButton", width=2,
+                   command=self._make_font_step(-1)).pack(side="left", padx=(0, 2))
+        ttk.Button(toolbar, text="+", style="Soft.TButton", width=2,
+                   command=self._make_font_step(1)).pack(side="left", padx=(0, 8))
+
+        self.gen_button: ttk.Button | None = None
+        if on_generate is not None:
+            self.gen_button = ttk.Button(toolbar, text=gen_label, style="Accent.TButton", command=on_generate)
+            self.gen_button.pack(side="right")
+
         self.text = ScrolledText(
             self,
             wrap="word",
@@ -87,10 +130,27 @@ class DetachedPanel(tk.Toplevel):
         self.text.pack(fill="both", expand=True, padx=10, pady=10)
         self.text.configure(state="disabled")
 
-    def update_text(self, content: str, font_size: int, *, append: bool = False) -> None:
+    def _make_font_step(self, delta: int):
+        def _step() -> None:
+            new_size = max(10, min(48, self._font_size_var.get() + delta))
+            self._font_size_var.set(new_size)
+            self.text.configure(font=("Bahnschrift", new_size))
+        return _step
+
+    def set_gen_label(self, text: str) -> None:
+        if self.gen_button is not None:
+            self.gen_button.configure(text=text)
+
+    def set_title(self, text: str) -> None:
+        self.title(text)
+        self._header_label.configure(text=text)
+
+    def update_text(self, content: str, font_size: int | None = None, *, append: bool = False) -> None:
         current_view = self.text.yview()
         was_near_bottom = current_view[1] >= 0.98
-        self.text.configure(state="normal", font=("Bahnschrift", font_size))
+        if font_size is not None:
+            self._font_size_var.set(font_size)
+        self.text.configure(state="normal", font=("Bahnschrift", self._font_size_var.get()))
         if append:
             self.text.insert("end", content)
         else:
@@ -132,6 +192,12 @@ class LiveCaptionApp:
         self.status_var = tk.StringVar(value=self._t("ready"))
         self.key_var = tk.StringVar(value=self.config.speech_key)
         self.region_var = tk.StringVar(value=self.config.speech_region)
+        self.gemini_key_var = tk.StringVar(value=self.config.gemini_key)
+        self.gemini_model_var = tk.StringVar(value=self.config.gemini_model)
+        self.ai_profile = self.config.ai_profile
+        self.last_question_source = ""
+        self.last_question_target = ""
+        self.ai_busy = False
         self.source_lang_var = tk.StringVar(value=source_label_for_locale(self.config.source_locale))
         self.target_lang_var = tk.StringVar(value=target_label_for_code(self.config.target_language))
         initial_mode = self.config.capture_mode or MODE_SYSTEM
@@ -270,6 +336,11 @@ class LiveCaptionApp:
         self.device_test_button.configure(text=self._t("device_test"))
         self.debug_audio_button.configure(text=self._t("debug_audio"))
 
+        self.gemini_key_label.configure(text=self._t("gemini_key"))
+        self.gemini_model_label.configure(text=self._t("gemini_model"))
+        self.ai_profile_button.configure(text=self._t("ai_profile"))
+        self.generate_answer_button.configure(text=self._t("generate_answer"))
+
         self.source_language_label.configure(text=self._t("source_language"))
         self.target_language_label.configure(text=self._t("target_language"))
         self.start_button.configure(text=self._t("start"))
@@ -285,6 +356,8 @@ class LiveCaptionApp:
             "partial_target": self._t("partial_target"),
             "final_source": self._t("final_source"),
             "final_target": self._t("final_target"),
+            "answer_source": self._t("answer_source"),
+            "answer_target": self._t("answer_target"),
         }
         for key, panel in self.panels.items():
             panel.title = panel_titles[key]
@@ -295,9 +368,12 @@ class LiveCaptionApp:
                 panel.copy_button.configure(text=self._t("copy"))
             if panel.clear_button is not None:
                 panel.clear_button.configure(text=self._t("clear"))
+            if panel.gen_button is not None:
+                panel.gen_button.configure(text=self._t("generate_answer"))
         for key, window in list(self.detached.items()):
             if window.winfo_exists():
-                window.title(self.panels[key].title)
+                window.set_title(self.panels[key].title)
+                window.set_gen_label(self._t("generate_answer"))
 
         self.mode_labels_by_code = {mode: self._mode_label(mode) for mode, _ in MODE_CHOICES}
         self.mode_codes_by_label = {label: mode for mode, label in self.mode_labels_by_code.items()}
@@ -341,16 +417,43 @@ class LiveCaptionApp:
         controls = ttk.Frame(shell, style="Card.TFrame", padding=(14, 14, 14, 10))
         controls.grid(row=1, column=0, sticky="nsew")
         controls.columnconfigure(0, weight=1)
-        controls.rowconfigure(4, weight=1)
+        controls.rowconfigure(5, weight=1)
 
         self._build_credentials_row(controls)
         self._build_audio_row(controls)
+        self._build_ai_row(controls)
         self._build_action_row(controls)
         self._build_board(controls)
 
         status_bar = ttk.Frame(shell, style="Card.TFrame", padding=(2, 10, 2, 0))
         status_bar.grid(row=2, column=0, sticky="ew")
         ttk.Label(status_bar, textvariable=self.status_var, style="Muted.TLabel").pack(anchor="w")
+
+    def _bind_right_click_paste(self, widget: tk.Widget) -> None:
+        """Entry ve ScrolledText icin sag tik kopyala/yapistir menusu baglar."""
+        def show_menu(event: tk.Event) -> None:
+            menu = tk.Menu(self.root, tearoff=0)
+            menu.configure(bg=COLORS["surface"], fg=COLORS["ink"])
+            try:
+                has_sel = bool(widget.selection_get())
+            except tk.TclError:
+                has_sel = False
+            menu.add_command(
+                label=self._t("ctx_cut"),
+                command=lambda: widget.event_generate("<<Cut>>"),
+                state="normal" if has_sel else "disabled",
+            )
+            menu.add_command(
+                label=self._t("ctx_copy"),
+                command=lambda: widget.event_generate("<<Copy>>"),
+                state="normal" if has_sel else "disabled",
+            )
+            menu.add_command(
+                label=self._t("ctx_paste"),
+                command=lambda: widget.event_generate("<<Paste>>"),
+            )
+            menu.tk_popup(event.x_root, event.y_root)
+        widget.bind("<Button-3>", show_menu)
 
     def _build_credentials_row(self, parent: ttk.Frame) -> None:
         row = ttk.Frame(parent, style="Toolbar.TFrame")
@@ -360,14 +463,14 @@ class LiveCaptionApp:
 
         self.azure_key_label = ttk.Label(row, text="")
         self.azure_key_label.grid(row=0, column=0, sticky="w")
-        ttk.Entry(row, textvariable=self.key_var, show="*").grid(
-            row=0, column=1, sticky="ew", padx=(6, 12)
-        )
+        key_entry = ttk.Entry(row, textvariable=self.key_var, show="*")
+        key_entry.grid(row=0, column=1, sticky="ew", padx=(6, 12))
+        self._bind_right_click_paste(key_entry)
         self.region_label = ttk.Label(row, text="")
         self.region_label.grid(row=0, column=2, sticky="w")
-        ttk.Entry(row, textvariable=self.region_var, width=18).grid(
-            row=0, column=3, sticky="ew", padx=(6, 12)
-        )
+        region_entry = ttk.Entry(row, textvariable=self.region_var, width=18)
+        region_entry.grid(row=0, column=3, sticky="ew", padx=(6, 12))
+        self._bind_right_click_paste(region_entry)
         self.ui_language_label = ttk.Label(row, text="")
         self.ui_language_label.grid(row=0, column=4, sticky="e", padx=(0, 6))
         self.ui_language_combo = ttk.Combobox(
@@ -445,9 +548,40 @@ class LiveCaptionApp:
             row=2, column=0, sticky="w", pady=(0, 12)
         )
 
+    def _build_ai_row(self, parent: ttk.Frame) -> None:
+        row = ttk.Frame(parent, style="Toolbar.TFrame")
+        row.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        for column in range(6):
+            row.columnconfigure(column, weight=1 if column == 1 else 0)
+
+        self.gemini_key_label = ttk.Label(row, text="")
+        self.gemini_key_label.grid(row=0, column=0, sticky="w")
+        gemini_key_entry = ttk.Entry(row, textvariable=self.gemini_key_var, show="*")
+        gemini_key_entry.grid(row=0, column=1, sticky="ew", padx=(6, 12))
+        self._bind_right_click_paste(gemini_key_entry)
+        self.gemini_model_label = ttk.Label(row, text="")
+        self.gemini_model_label.grid(row=0, column=2, sticky="w")
+        gemini_model_entry = ttk.Entry(row, textvariable=self.gemini_model_var, width=22)
+        gemini_model_entry.grid(row=0, column=3, sticky="ew", padx=(6, 12))
+        self._bind_right_click_paste(gemini_model_entry)
+        self.ai_profile_button = ttk.Button(
+            row,
+            text="",
+            style="Soft.TButton",
+            command=self.edit_ai_profile,
+        )
+        self.ai_profile_button.grid(row=0, column=4, padx=(0, 8))
+        self.generate_answer_button = ttk.Button(
+            row,
+            text="",
+            style="Accent.TButton",
+            command=self.generate_ai_answer,
+        )
+        self.generate_answer_button.grid(row=0, column=5, padx=(0, 8))
+
     def _build_action_row(self, parent: ttk.Frame) -> None:
         row = ttk.Frame(parent, style="Toolbar.TFrame")
-        row.grid(row=3, column=0, sticky="ew", pady=(0, 14))
+        row.grid(row=4, column=0, sticky="ew", pady=(0, 14))
         for column in range(12):
             row.columnconfigure(column, weight=1 if column in (1, 3) else 0)
 
@@ -507,16 +641,19 @@ class LiveCaptionApp:
 
     def _build_board(self, parent: ttk.Frame) -> None:
         board = ttk.Frame(parent, style="Card.TFrame")
-        board.grid(row=4, column=0, sticky="nsew")
+        board.grid(row=5, column=0, sticky="nsew")
         board.columnconfigure(0, weight=1)
         board.columnconfigure(1, weight=1)
         board.rowconfigure(0, weight=1)
         board.rowconfigure(1, weight=1)
+        board.rowconfigure(2, weight=1)
 
         self._create_panel(board, 0, 0, "partial_source", "Anlik Orijinal")
         self._create_panel(board, 0, 1, "partial_target", "Anlik Ceviri")
         self._create_panel(board, 1, 0, "final_source", "Final Orijinal")
         self._create_panel(board, 1, 1, "final_target", "Final Ceviri")
+        self._create_panel(board, 2, 0, "answer_source", "Onerilen Cevap (Soylenecek)")
+        self._create_panel(board, 2, 1, "answer_target", "Cevabin Anlami")
 
     def _create_panel(self, parent: ttk.Frame, row: int, column: int, key: str, title: str) -> None:
         frame = ttk.LabelFrame(parent, text=title, style="Section.TLabelframe", padding=(10, 10, 10, 10))
@@ -530,40 +667,80 @@ class LiveCaptionApp:
 
         action_column = 1
         detach_button = None
+        # Partial ve answer panelleri ayrilabilir; final paneller sabit kalir
         if not key.startswith("final"):
             detach_button = ttk.Button(actions, text="", style="Soft.TButton", command=lambda: self.toggle_detached(key))
             detach_button.grid(row=0, column=action_column, padx=(0, 6))
             action_column += 1
         copy_button = ttk.Button(actions, text="", style="Soft.TButton", command=lambda: self.copy_panel(key))
         copy_button.grid(row=0, column=action_column, padx=(0, 6))
+        action_column += 1
         clear_button = None
-        if key.startswith("final"):
+        if not key.startswith("partial"):
             clear_button = ttk.Button(actions, text="", style="Soft.TButton", command=lambda: self.set_panel_text(key, ""))
-            clear_button.grid(row=0, column=action_column + 1)
+            clear_button.grid(row=0, column=action_column, padx=(0, 6))
+            action_column += 1
+        # Cevap Uret butonu: soru panellerinde (source/target) goster, answer panellerinde goster ma
+        gen_button = None
+        if not key.startswith("answer"):
+            gen_button = ttk.Button(actions, text="", style="Soft.TButton", command=self.generate_ai_answer)
+            gen_button.grid(row=0, column=action_column, padx=(0, 6))
+            action_column += 1
 
+        # Her panele kendi font buyutme/kucultme butonlari (placeholder — widget sonra bağlanır)
+        panel_font_var = tk.IntVar(value=self.font_size_var.get())
+        minus_btn = ttk.Button(actions, text="-", style="Soft.TButton", width=2)
+        minus_btn.grid(row=0, column=action_column, padx=(0, 2))
+        plus_btn = ttk.Button(actions, text="+", style="Soft.TButton", width=2)
+        plus_btn.grid(row=0, column=action_column + 1, padx=(0, 6))
+
+        if key.startswith("partial"):
+            panel_bg = COLORS["panel"]
+        elif key.startswith("answer"):
+            panel_bg = COLORS["panel_answer"]
+        else:
+            panel_bg = COLORS["panel_alt"]
         widget = ScrolledText(
             frame,
             wrap="word",
             height=10,
-            bg=COLORS["panel"] if "partial" in key else COLORS["panel_alt"],
+            bg=panel_bg,
             fg=COLORS["text_on_dark"],
             insertbackground=COLORS["text_on_dark"],
             relief="flat",
             borderwidth=0,
             padx=16,
             pady=16,
-            font=("Bahnschrift", self.font_size_var.get()),
+            font=("Bahnschrift", panel_font_var.get()),
         )
         widget.grid(row=1, column=0, sticky="nsew")
         widget.configure(state="disabled")
+        self._bind_right_click_paste(widget)
+
+        # Widget hazir, font adim komutlarini bagla
+        def _make_step(delta: int) -> object:
+            def _step() -> None:
+                new_size = max(10, min(48, panel_font_var.get() + delta))
+                panel_font_var.set(new_size)
+                widget.configure(font=("Bahnschrift", new_size))
+                dp = self.detached.get(key)
+                if dp and dp.winfo_exists():
+                    dp.update_text(self.get_panel_text(key), new_size)
+            return _step
+
+        minus_btn.configure(command=_make_step(-1))
+        plus_btn.configure(command=_make_step(1))
+
         self.panels[key] = TranscriptPanel(
             key=key,
             title=title,
             frame=frame,
             widget=widget,
+            font_size_var=panel_font_var,
             detach_button=detach_button,
             copy_button=copy_button,
             clear_button=clear_button,
+            gen_button=gen_button,
         )
 
     def _selected_source(self) -> AudioSource | None:
@@ -846,6 +1023,9 @@ class LiveCaptionApp:
         self.config = AppConfig(
             speech_key=self.key_var.get().strip(),
             speech_region=self.region_var.get().strip(),
+            gemini_key=self.gemini_key_var.get().strip(),
+            gemini_model=self.gemini_model_var.get().strip(),
+            ai_profile=self.ai_profile,
             source_locale=source_option.speech_locale,
             target_language=target_option.translation_code,
             ui_language=self.ui_language_code,
@@ -868,14 +1048,35 @@ class LiveCaptionApp:
     def _apply_topmost(self) -> None:
         keep_top = self.topmost_var.get()
         self.root.attributes("-topmost", keep_top)
+        if keep_top:
+            # "Yumusak" ustekal: baska uygulamaya gecildiginde arkaplanlasmaya izin ver.
+            # focus_get() None donunce focus bizim disimizda demektir.
+            self.root.bind_all("<FocusOut>", self._on_focus_change)
+            self.root.bind_all("<FocusIn>", self._on_focus_change)
+        else:
+            self.root.unbind_all("<FocusOut>")
+            self.root.unbind_all("<FocusIn>")
         for panel in self.detached.values():
             if panel.winfo_exists():
                 panel.attributes("-topmost", keep_top)
         self._persist_minor_settings()
 
+    def _on_focus_change(self, _event: tk.Event) -> None:
+        self.root.after(60, self._sync_topmost_to_focus)
+
+    def _sync_topmost_to_focus(self) -> None:
+        if not self.topmost_var.get():
+            return
+        # focus_get() None ise hicbir widget'imiz focus'ta degil = baska uygulamada
+        has_focus = self.root.focus_get() is not None
+        self.root.attributes("-topmost", has_focus)
+
     def _apply_font_size(self) -> None:
         font_size = self.font_size_var.get()
         for panel in self.panels.values():
+            # Global zoom: panel'in kendi font_size_var'ini da senkronize et
+            if panel.font_size_var is not None:
+                panel.font_size_var.set(font_size)
             panel.widget.configure(font=("Bahnschrift", font_size))
         for key, window in list(self.detached.items()):
             if window.winfo_exists():
@@ -934,9 +1135,108 @@ class LiveCaptionApp:
 
     def clear_all(self) -> None:
         self.history.clear()
+        self.last_question_source = ""
+        self.last_question_target = ""
         for key in self.panels:
             self.set_panel_text(key, "")
         self.status_var.set(self._t("cleared"))
+
+    def edit_ai_profile(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title(self._t("ai_profile_title"))
+        dialog.configure(bg=COLORS["surface"])
+        dialog.transient(self.root)
+        dialog.geometry("560x420")
+        dialog.attributes("-topmost", self.topmost_var.get())
+
+        container = ttk.Frame(dialog, style="Card.TFrame", padding=16)
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(1, weight=1)
+
+        ttk.Label(container, text=self._t("ai_profile_hint"), style="Hint.TLabel", wraplength=520).grid(
+            row=0, column=0, sticky="w", pady=(0, 10)
+        )
+        text_box = ScrolledText(
+            container,
+            wrap="word",
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text_on_dark"],
+            insertbackground=COLORS["text_on_dark"],
+            relief="flat",
+            borderwidth=0,
+            padx=12,
+            pady=12,
+            font=("Bahnschrift", 12),
+        )
+        text_box.grid(row=1, column=0, sticky="nsew")
+        text_box.insert("1.0", self.ai_profile)
+        text_box.focus_set()
+
+        button_row = ttk.Frame(container, style="Toolbar.TFrame")
+        button_row.grid(row=2, column=0, sticky="e", pady=(12, 0))
+
+        def save_and_close() -> None:
+            self.ai_profile = text_box.get("1.0", "end-1c").strip()
+            self.config.ai_profile = self.ai_profile
+            save_config(self.config)
+            self.status_var.set(self._t("ai_profile_saved"))
+            dialog.destroy()
+
+        ttk.Button(button_row, text=self._t("save"), style="Accent.TButton", command=save_and_close).grid(
+            row=0, column=0
+        )
+
+    def generate_ai_answer(self) -> None:
+        if self.ai_busy:
+            return
+
+        api_key = self.gemini_key_var.get().strip()
+        if not api_key:
+            messagebox.showerror(self._t("ai_error_title"), self._t("ai_key_empty"))
+            return
+
+        question = self.last_question_source.strip()
+        if not question:
+            self.status_var.set(self._t("ai_no_question"))
+            return
+
+        question_text = question
+        if self.last_question_target.strip():
+            question_text = (
+                f"{question}\n\n(Translation for context: {self.last_question_target.strip()})"
+            )
+
+        answer_language = LANGUAGE_BY_LABEL[self.source_lang_var.get()].label
+        understand_language = LANGUAGE_BY_LABEL[self.target_lang_var.get()].label
+        model = self.gemini_model_var.get().strip()
+        profile = self.ai_profile
+
+        self.ai_busy = True
+        self.generate_answer_button.configure(state="disabled")
+        self.status_var.set(self._t("ai_thinking"))
+
+        def worker() -> None:
+            try:
+                result = generate_interview_answer(
+                    api_key=api_key,
+                    question=question_text,
+                    answer_language=answer_language,
+                    understand_language=understand_language,
+                    model=model,
+                    profile=profile,
+                )
+                self.event_queue.put(
+                    {
+                        "type": "ai_answer",
+                        "answer": result["answer"],
+                        "answer_translation": result["answer_translation"],
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - kullaniciya hata mesaji gosterilecek
+                self.event_queue.put({"type": "ai_error", "message": str(exc)})
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def get_panel_text(self, key: str) -> str:
         return self.panels[key].widget.get("1.0", "end-1c")
@@ -954,20 +1254,31 @@ class LiveCaptionApp:
 
         floating = self.detached.get(key)
         if floating and floating.winfo_exists():
-            floating.update_text(self.get_panel_text(key) if not append else text, self.font_size_var.get(), append=append)
+            floating.update_text(self.get_panel_text(key) if not append else text, append=append)
 
     def toggle_detached(self, key: str) -> None:
         if key.startswith("final"):
-            return
+            return  # final paneller ayrilmaz
         current = self.detached.get(key)
         if current and current.winfo_exists():
             current.destroy()
             self.detached.pop(key, None)
             return
 
-        panel = DetachedPanel(self.root, self.panels[key].title, self.font_size_var.get())
+        # Answer panellerinde regenerate mantikli degil; diger panellerde "Cevap Uret" butonu goster
+        on_gen = None if key.startswith("answer") else self.generate_ai_answer
+        # Almanca (source) paneller kirmizi, Türkçe (target) paneller mavi
+        header_color = "#6b1010" if key.endswith("_source") else "#10306b"
+        panel = DetachedPanel(
+            self.root,
+            self.panels[key].title,
+            self.font_size_var.get(),
+            on_generate=on_gen,
+            gen_label=self._t("generate_answer"),
+            header_color=header_color,
+        )
         panel.attributes("-topmost", self.topmost_var.get())
-        panel.update_text(self.get_panel_text(key), self.font_size_var.get())
+        panel.update_text(self.get_panel_text(key))
         panel.protocol("WM_DELETE_WINDOW", lambda: self._close_detached(key))
         self.detached[key] = panel
 
@@ -1068,6 +1379,9 @@ class LiveCaptionApp:
                     self.set_panel_text("final_target", f"{event['target']}\n\n", append=True)
                     self.set_panel_text("partial_source", "")
                     self.set_panel_text("partial_target", "")
+                    if event["source"].strip():
+                        self.last_question_source = event["source"].strip()
+                        self.last_question_target = event["target"].strip()
                     self.history.append(
                         {
                             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -1077,6 +1391,17 @@ class LiveCaptionApp:
                     )
                 elif event_type == "status":
                     self.status_var.set(event["message"])
+                elif event_type == "ai_answer":
+                    self.ai_busy = False
+                    self.generate_answer_button.configure(state="normal")
+                    self.set_panel_text("answer_source", event["answer"])
+                    self.set_panel_text("answer_target", event["answer_translation"])
+                    self.status_var.set(self._t("ai_ready"))
+                elif event_type == "ai_error":
+                    self.ai_busy = False
+                    self.generate_answer_button.configure(state="normal")
+                    self.status_var.set(self._t("ai_error_title"))
+                    messagebox.showerror(self._t("ai_error_title"), event["message"])
                 elif event_type == "canceled":
                     prefix = "Azure canceled: " if self.ui_language_code == "en" else "Azure abgebrochen: " if self.ui_language_code == "de" else "Azure iptal etti: "
                     self.status_var.set(f"{prefix}{event['message']}")
