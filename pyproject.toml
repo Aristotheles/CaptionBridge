@@ -3,20 +3,21 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ceviri-app"
-version = "0.1.0"
-description = "Live caption and translation desktop app for Windows"
+name = "CaptionBridge"
+version = "1.1.0"
+description = "Live caption, translation, and AI prompter desktop app for Windows"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "azure-cognitiveservices-speech>=1.41.1",
+  "google-genai>=1.0.0",
   "numpy>=2.0.0",
   "soundcard>=0.4.5",
   "sounddevice>=0.5.0",
 ]
 
 [project.scripts]
-ceviri-app = "ceviri_app.main:main"
+captionbridge = "ceviri_app.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

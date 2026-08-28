@@ -16,7 +16,7 @@ class AppConfig:
     speech_key: str = ""
     speech_region: str = ""
     gemini_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.6-flash"
     ai_profile: str = ""
     source_locale: str = "de-DE"
     target_language: str = "tr"
@@ -25,6 +25,7 @@ class AppConfig:
     input_device_name: str = ""
     topmost: bool = True
     font_size: int = 18
+    auto_answer: bool = False
 
     def __post_init__(self) -> None:
         if not self.ui_language:

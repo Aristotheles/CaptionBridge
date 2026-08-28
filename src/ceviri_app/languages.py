@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,17 +14,17 @@ class LanguageOption:
 LANGUAGES: list[LanguageOption] = [
     LanguageOption("Deutsch (German)", "de-DE", "de"),
     LanguageOption("English", "en-US", "en"),
-    LanguageOption("Turkce (Turkish)", "tr-TR", "tr"),
-    LanguageOption("Francais (French)", "fr-FR", "fr"),
-    LanguageOption("Espanol (Spanish)", "es-ES", "es"),
+    LanguageOption("Türkçe (Turkish)", "tr-TR", "tr"),
+    LanguageOption("Français (French)", "fr-FR", "fr"),
+    LanguageOption("Español (Spanish)", "es-ES", "es"),
     LanguageOption("Italiano (Italian)", "it-IT", "it"),
-    LanguageOption("Portugues (Portuguese)", "pt-BR", "pt"),
+    LanguageOption("Português (Portuguese)", "pt-BR", "pt"),
     LanguageOption("Nederlands (Dutch)", "nl-NL", "nl"),
-    LanguageOption("Russkiy (Russian)", "ru-RU", "ru"),
-    LanguageOption("Arabic", "ar-EG", "ar"),
-    LanguageOption("Japanese", "ja-JP", "ja"),
-    LanguageOption("Korean", "ko-KR", "ko"),
-    LanguageOption("Chinese Simplified", "zh-CN", "zh-Hans"),
+    LanguageOption("Русский (Russian)", "ru-RU", "ru"),
+    LanguageOption("العربية (Arabic)", "ar-EG", "ar"),
+    LanguageOption("日本語 (Japanese)", "ja-JP", "ja"),
+    LanguageOption("한국어 (Korean)", "ko-KR", "ko"),
+    LanguageOption("中文 (Chinese Simplified)", "zh-CN", "zh-Hans"),
 ]
 
 LANGUAGE_BY_LABEL = {item.label: item for item in LANGUAGES}

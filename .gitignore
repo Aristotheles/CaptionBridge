@@ -17,12 +17,18 @@ build/
 dist/
 dist_*/
 *.spec
+*.zip
+*.tar.gz
+*.exe
 
-# User specific config (CaptionsBridge data is in APPDATA, but just in case)
+# User specific config (CaptionBridge config is in %LOCALAPPDATA%\CaptionBridge)
 config.json
+*.key
+*.pem
 
-# Logs & Tests
+# Logs, Audio Samples & Tests
 *.log
+*.wav
 .pytest_cache/
 .mypy_cache/
 .coverage
@@ -39,4 +45,3 @@ _analysis/
 ANALIZ.md
 scratch/
 *.egg-info/
-
